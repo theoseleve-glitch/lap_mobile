@@ -1,0 +1,40 @@
+name: LapCoachMobileApp
+options:
+  minimumXcodeGenVersion: 2.40.0
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    IPHONEOS_DEPLOYMENT_TARGET: 17.0
+targets:
+  LapCoachMobileApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: LapCoachMobileApp
+    info:
+      path: Config/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lapcoach.mobile
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-lsqlite3"
+    scheme:
+      gatherCoverageData: true
+      testTargets:
+        - LapCoachMobileAppTests
+  LapCoachMobileAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: LapCoachMobileAppTests
+    dependencies:
+      - target: LapCoachMobileApp
+    hostApplication: LapCoachMobileApp
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

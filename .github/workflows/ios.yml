@@ -1,0 +1,26 @@
+name: iOS
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Project
+        run: xcodegen generate
+
+      - name: Build
+        run: xcodebuild build -project LapCoachMobileApp.xcodeproj -scheme LapCoachMobileApp -destination 'generic/platform=iOS'
+
+      - name: Test
+        run: xcodebuild test -project LapCoachMobileApp.xcodeproj -scheme LapCoachMobileApp -destination 'platform=iOS Simulator,name=iPhone 15'
