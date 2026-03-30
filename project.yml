@@ -27,6 +27,7 @@ targets:
       gatherCoverageData: true
       testTargets:
         - LapCoachMobileAppTests
+        - LapCoachMobileAppUITests
   LapCoachMobileAppTests:
     type: bundle.unit-test
     platform: iOS
@@ -35,6 +36,16 @@ targets:
     dependencies:
       - target: LapCoachMobileApp
     hostApplication: LapCoachMobileApp
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+  LapCoachMobileAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: LapCoachMobileAppUITests
+    dependencies:
+      - target: LapCoachMobileApp
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
