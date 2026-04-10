@@ -17,16 +17,19 @@ final class LoginViewModel: ObservableObject {
         email.contains("@") && password.isEmpty == false && isLoading == false
     }
 
-    func signIn() async {
+    func signIn() async -> Bool {
         errorMessage = nil
         isLoading = true
 
         do {
             try await submitAction(email, password)
+            isLoading = false
+            return true
         } catch {
             errorMessage = error.localizedDescription
         }
 
         isLoading = false
+        return false
     }
 }

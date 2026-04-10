@@ -9,7 +9,7 @@ final class LapCoachMobileAppUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        let title = app.staticTexts["Lap Coach"]
+        let title = app.navigationBars["Sessions"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
 
         let screenshot = XCUIScreen.main.screenshot()

@@ -8,7 +8,7 @@ final class NetworkServiceTests: XCTestCase {
         MockURLProtocol.reset()
     }
 
-    func testUploadSendsRegisterChunkAndFinalizeRequests() async throws {
+    func testRegisterChunkAndFinalizeRequests() async throws {
         MockURLProtocol.requestHandler = { request in
             MockURLProtocol.seenPaths.append(request.url?.path ?? "")
 
@@ -63,6 +63,11 @@ final class NetworkServiceTests: XCTestCase {
             totalSamples: 1,
             localFilePath: fileURL.path,
             remoteSessionID: nil,
+            totalChunkCount: 0,
+            lastUploadedChunkIndex: -1,
+            retryCount: 0,
+            lastUploadAttemptAt: nil,
+            nextRetryAt: nil,
             lastError: nil,
             summary: nil
         )
@@ -73,7 +78,12 @@ final class NetworkServiceTests: XCTestCase {
             user: AuthenticatedUser(id: "user-1", email: "test@example.com", displayName: nil)
         )
 
-        let remoteID = try await service.upload(session: recordedSession, fileURL: fileURL, authSession: authSession)
+        let remoteID = try await service.register(session: recordedSession, authSession: authSession)
+        let chunks = try service.makeChunkPayloads(from: fileURL, chunkSize: service.defaultChunkSize)
+        XCTAssertEqual(chunks.count, 1)
+        try await service.upload(chunk: chunks[0], remoteSessionID: remoteID, authSession: authSession)
+        try await service.finalize(remoteSessionID: remoteID, authSession: authSession)
+
         XCTAssertEqual(remoteID, "remote-123")
         XCTAssertEqual(MockURLProtocol.seenPaths, [
             "/mobile/sessions",

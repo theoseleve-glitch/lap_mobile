@@ -8,6 +8,20 @@ struct ContentView: View {
             BrandTheme.canvas.ignoresSafeArea()
             content
         }
+        .sheet(isPresented: $appModel.isLoginPresented) {
+            NavigationStack {
+                LoginView(appModel: appModel) {
+                    appModel.dismissLogin()
+                }
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Close") {
+                            appModel.dismissLogin()
+                        }
+                    }
+                }
+            }
+        }
         .fullScreenCover(
             isPresented: Binding(
                 get: { appModel.sessionManager.isDashboardPresented },
@@ -38,8 +52,6 @@ struct ContentView: View {
                 Text("Preparing telemetry workspace")
                     .foregroundStyle(BrandTheme.ink)
             }
-        } else if appModel.authSession == nil {
-            LoginView(appModel: appModel)
         } else {
             SessionListView(appModel: appModel)
         }

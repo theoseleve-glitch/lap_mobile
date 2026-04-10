@@ -24,12 +24,55 @@ enum RecordedSessionStatus: String, Codable, Sendable {
 
 enum SessionUploadState: String, Codable, Sendable {
     case pending
-    case uploading
+    case registering = "registering"
+    case uploadingChunks = "uploading_chunks"
+    case finalizing
     case uploaded
     case failed
 
     var label: String {
-        rawValue.capitalized
+        switch self {
+        case .pending:
+            return "Pending"
+        case .registering:
+            return "Registering"
+        case .uploadingChunks:
+            return "Uploading"
+        case .finalizing:
+            return "Finalizing"
+        case .uploaded:
+            return "Uploaded"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    var isTerminal: Bool {
+        switch self {
+        case .uploaded, .failed:
+            return true
+        case .pending, .registering, .uploadingChunks, .finalizing:
+            return false
+        }
+    }
+
+    init(storageValue: String) {
+        switch storageValue {
+        case SessionUploadState.pending.rawValue:
+            self = .pending
+        case SessionUploadState.registering.rawValue:
+            self = .registering
+        case SessionUploadState.uploadingChunks.rawValue, "uploading":
+            self = .uploadingChunks
+        case SessionUploadState.finalizing.rawValue:
+            self = .finalizing
+        case SessionUploadState.uploaded.rawValue:
+            self = .uploaded
+        case SessionUploadState.failed.rawValue:
+            self = .failed
+        default:
+            self = .pending
+        }
     }
 }
 
@@ -96,6 +139,11 @@ struct RecordedSession: Identifiable, Codable, Hashable, Sendable {
     var totalSamples: Int
     var localFilePath: String
     var remoteSessionID: String?
+    var totalChunkCount: Int
+    var lastUploadedChunkIndex: Int
+    var retryCount: Int
+    var lastUploadAttemptAt: Date?
+    var nextRetryAt: Date?
     var lastError: String?
     var summary: SessionSummary?
 
@@ -110,5 +158,11 @@ extension RecordedSession {
         formatter.allowedUnits = [.hour, .minute, .second]
         formatter.unitsStyle = .abbreviated
         return formatter.string(from: duration) ?? "0s"
+    }
+
+    var isReadyForRetry: Bool {
+        guard uploadState != .uploaded else { return false }
+        guard let nextRetryAt else { return true }
+        return nextRetryAt <= Date()
     }
 }

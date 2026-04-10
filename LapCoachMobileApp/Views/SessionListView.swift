@@ -10,6 +10,20 @@ struct SessionListView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     heroSection
 
+                    if let syncNotice = appModel.syncNotice {
+                        banner(text: syncNotice, tint: BrandTheme.warning.opacity(0.18))
+                    }
+
+                    if appModel.authSession == nil, appModel.isSyncAvailable {
+                        banner(
+                            text: "You are recording in offline mode. Sign in when you are ready to sync pending sessions.",
+                            tint: BrandTheme.accent.opacity(0.14),
+                            actionTitle: "Sign In to Sync"
+                        ) {
+                            appModel.presentLogin()
+                        }
+                    }
+
                     if let globalErrorMessage = appModel.globalErrorMessage {
                         Text(globalErrorMessage)
                             .font(.footnote)
@@ -42,8 +56,16 @@ struct SessionListView: View {
             .navigationTitle("Sessions")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Sign Out") {
-                        appModel.signOut()
+                    if let authSession = appModel.authSession {
+                        Menu(authSession.user.email) {
+                            Button("Sign Out", role: .destructive) {
+                                appModel.signOut()
+                            }
+                        }
+                    } else if appModel.isSyncAvailable {
+                        Button("Sign In") {
+                            appModel.presentLogin()
+                        }
                     }
                 }
 
@@ -68,12 +90,16 @@ struct SessionListView: View {
             Text("Ready for the next stint")
                 .font(.system(size: 28, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
-            Text("Your sessions are written locally first, then uploaded in chunks so you do not lose a run to a flaky connection.")
+            Text("Sessions are written locally first. Sync is optional and resumes from the last uploaded chunk when you sign back in.")
                 .foregroundStyle(.white.opacity(0.88))
             HStack(spacing: 12) {
                 StatusPill(title: "\(appModel.sessions.count) total", color: .white.opacity(0.2))
                 StatusPill(
                     title: "\(appModel.sessions.filter { $0.uploadState == .uploaded }.count) synced",
+                    color: Color.white.opacity(0.15)
+                )
+                StatusPill(
+                    title: "\(appModel.sessions.filter { $0.uploadState == .pending || $0.uploadState == .failed }.count) local",
                     color: Color.white.opacity(0.15)
                 )
             }
@@ -100,6 +126,29 @@ struct SessionListView: View {
             .tint(BrandTheme.accent)
         }
         .appCard()
+    }
+
+    private func banner(
+        text: String,
+        tint: Color,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(text)
+                .foregroundStyle(BrandTheme.ink)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.borderedProminent)
+                    .tint(BrandTheme.accent)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(tint)
+        )
     }
 }
 
@@ -137,7 +186,7 @@ private struct SessionRowCard: View {
         switch session.uploadState {
         case .uploaded:
             return BrandTheme.success
-        case .uploading:
+        case .registering, .uploadingChunks, .finalizing:
             return BrandTheme.warning
         case .pending:
             return BrandTheme.accent

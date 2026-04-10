@@ -3,7 +3,10 @@ import SwiftUI
 struct LoginView: View {
     @StateObject private var viewModel: LoginViewModel
 
-    init(appModel: LapCoachAppModel) {
+    private let onSignedIn: (() -> Void)?
+
+    init(appModel: LapCoachAppModel, onSignedIn: (() -> Void)? = nil) {
+        self.onSignedIn = onSignedIn
         _viewModel = StateObject(
             wrappedValue: LoginViewModel { email, password in
                 try await appModel.signIn(email: email, password: password)
@@ -61,7 +64,10 @@ struct LoginView: View {
 
                     Button {
                         Task {
-                            await viewModel.signIn()
+                            let didSucceed = await viewModel.signIn()
+                            if didSucceed {
+                                onSignedIn?()
+                            }
                         }
                     } label: {
                         HStack {
@@ -84,5 +90,6 @@ struct LoginView: View {
             }
             .padding(20)
         }
+        .background(BrandTheme.canvas.ignoresSafeArea())
     }
 }

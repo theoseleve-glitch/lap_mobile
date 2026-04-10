@@ -12,7 +12,6 @@ final class SessionManagerTests: XCTestCase {
         let bleService = FakeBLEService()
         let manager = SessionManager(
             storageService: storageService,
-            networkService: FakeNetworkService(),
             locationService: locationService,
             motionService: motionService,
             bleService: bleService
@@ -42,11 +41,13 @@ final class SessionManagerTests: XCTestCase {
             )
         )
 
-        await manager.stopRecording(authSession: nil)
+        let finalizedSession = await manager.stopRecording()
 
         let sessions = try await storageService.listSessions()
+        XCTAssertNotNil(finalizedSession)
         XCTAssertEqual(sessions.count, 1)
         XCTAssertEqual(sessions[0].status, .completed)
+        XCTAssertEqual(sessions[0].uploadState, .pending)
         XCTAssertGreaterThan(sessions[0].totalSamples, 0)
         XCTAssertNotNil(sessions[0].summary)
     }
@@ -76,10 +77,4 @@ private final class FakeBLEService: BLEServiceType {
     var onPeripheralNameChange: ((String?) -> Void)?
     func startScanning() {}
     func stop() {}
-}
-
-private final class FakeNetworkService: NetworkServiceType {
-    func upload(session: RecordedSession, fileURL: URL, authSession: AuthSession) async throws -> String {
-        "remote-session"
-    }
 }

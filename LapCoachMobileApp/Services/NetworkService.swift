@@ -1,25 +1,40 @@
 import Foundation
 
 protocol NetworkServiceType: AnyObject {
-    func upload(session: RecordedSession, fileURL: URL, authSession: AuthSession) async throws -> String
+    var backgroundSessionIdentifier: String { get }
+    var defaultChunkSize: Int { get }
+    func makeChunkPayloads(from fileURL: URL, chunkSize: Int) throws -> [SessionChunkPayload]
+    func register(session: RecordedSession, authSession: AuthSession) async throws -> String
+    func upload(chunk: SessionChunkPayload, remoteSessionID: String, authSession: AuthSession) async throws
+    func finalize(remoteSessionID: String, authSession: AuthSession) async throws
 }
 
 final class NetworkService: NetworkServiceType {
-    private let apiConfiguration: APIConfiguration
+    let backgroundSessionIdentifier = "com.lapcoach.uploads"
+    let defaultChunkSize = 250
+
+    private let apiConfiguration: APIConfiguration?
     private let session: URLSession
-    private let injectedUploadSession: URLSession?
+    private let uploadSession: URLSession
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    init(apiConfiguration: APIConfiguration, session: URLSession? = nil) {
+    init(apiConfiguration: APIConfiguration?, session: URLSession? = nil) {
         self.apiConfiguration = apiConfiguration
 
         if let session {
             self.session = session
-            self.injectedUploadSession = session
+            self.uploadSession = session
         } else {
             self.session = URLSession(configuration: .default)
-            self.injectedUploadSession = nil
+
+            let configuration = URLSessionConfiguration.background(withIdentifier: backgroundSessionIdentifier)
+            configuration.isDiscretionary = false
+            configuration.sessionSendsLaunchEvents = true
+            configuration.waitsForConnectivity = true
+            configuration.timeoutIntervalForRequest = 60
+            configuration.timeoutIntervalForResource = 300
+            self.uploadSession = URLSession(configuration: configuration)
         }
 
         let encoder = JSONEncoder()
@@ -31,20 +46,11 @@ final class NetworkService: NetworkServiceType {
         self.decoder = decoder
     }
 
-    func upload(session: RecordedSession, fileURL: URL, authSession: AuthSession) async throws -> String {
-        let remoteSessionID = try await register(session: session, authSession: authSession)
-        let chunkPayloads = try CSVSampleFileReader.makeChunks(from: fileURL, chunkSize: 250)
-        let uploadSession = makeUploadSession(for: session.id.uuidString)
-
-        for chunk in chunkPayloads {
-            try await upload(chunk: chunk, remoteSessionID: remoteSessionID, authSession: authSession, uploadSession: uploadSession)
-        }
-
-        try await finalize(remoteSessionID: remoteSessionID, authSession: authSession)
-        return remoteSessionID
+    func makeChunkPayloads(from fileURL: URL, chunkSize: Int) throws -> [SessionChunkPayload] {
+        try CSVSampleFileReader.makeChunks(from: fileURL, chunkSize: chunkSize)
     }
 
-    private func register(session: RecordedSession, authSession: AuthSession) async throws -> String {
+    func register(session: RecordedSession, authSession: AuthSession) async throws -> String {
         let payload = SessionRegistrationPayload(
             sessionID: session.id.uuidString,
             source: session.sourceMode.rawValue,
@@ -53,7 +59,7 @@ final class NetworkService: NetworkServiceType {
             totalSamples: session.totalSamples
         )
 
-        var request = URLRequest(url: apiConfiguration.endpoint(apiConfiguration.sessionsPath))
+        var request = URLRequest(url: try endpoint(for: requiredConfiguration().sessionsPath))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(authSession.accessToken)", forHTTPHeaderField: "Authorization")
@@ -65,12 +71,7 @@ final class NetworkService: NetworkServiceType {
         return createResponse.sessionID
     }
 
-    private func upload(
-        chunk: SessionChunkPayload,
-        remoteSessionID: String,
-        authSession: AuthSession,
-        uploadSession: URLSession
-    ) async throws {
+    func upload(chunk: SessionChunkPayload, remoteSessionID: String, authSession: AuthSession) async throws {
         let tempFileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("lapcoach-\(remoteSessionID)-\(chunk.chunkIndex).json")
         let body = try encoder.encode(chunk)
@@ -80,7 +81,7 @@ final class NetworkService: NetworkServiceType {
             try? FileManager.default.removeItem(at: tempFileURL)
         }
 
-        var request = URLRequest(url: apiConfiguration.endpoint("\(apiConfiguration.sessionsPath)/\(remoteSessionID)/chunks"))
+        var request = URLRequest(url: try endpoint(for: "\(requiredConfiguration().sessionsPath)/\(remoteSessionID)/chunks"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(authSession.accessToken)", forHTTPHeaderField: "Authorization")
@@ -89,10 +90,10 @@ final class NetworkService: NetworkServiceType {
         try validate(response: response)
     }
 
-    private func finalize(remoteSessionID: String, authSession: AuthSession) async throws {
+    func finalize(remoteSessionID: String, authSession: AuthSession) async throws {
         let payload = SessionFinalizePayload(sessionID: remoteSessionID)
 
-        var request = URLRequest(url: apiConfiguration.endpoint("\(apiConfiguration.sessionsPath)/\(remoteSessionID)/finalize"))
+        var request = URLRequest(url: try endpoint(for: "\(requiredConfiguration().sessionsPath)/\(remoteSessionID)/finalize"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(authSession.accessToken)", forHTTPHeaderField: "Authorization")
@@ -100,6 +101,17 @@ final class NetworkService: NetworkServiceType {
 
         let (_, response) = try await session.data(for: request)
         try validate(response: response)
+    }
+
+    private func requiredConfiguration() throws -> APIConfiguration {
+        guard let apiConfiguration else {
+            throw NetworkServiceError.syncUnavailable
+        }
+        return apiConfiguration
+    }
+
+    private func endpoint(for path: String) throws -> URL {
+        try requiredConfiguration().endpoint(path)
     }
 
     private func validate(response: URLResponse) throws {
@@ -111,26 +123,31 @@ final class NetworkService: NetworkServiceType {
             throw NetworkServiceError.statusCode(response.statusCode)
         }
     }
-
-    private func makeUploadSession(for sessionID: String) -> URLSession {
-        if let injectedUploadSession {
-            return injectedUploadSession
-        }
-
-        let configuration = URLSessionConfiguration.background(withIdentifier: "com.lapcoach.upload.\(sessionID)")
-        configuration.isDiscretionary = false
-        configuration.sessionSendsLaunchEvents = true
-        configuration.waitsForConnectivity = true
-        return URLSession(configuration: configuration)
-    }
 }
 
-enum NetworkServiceError: LocalizedError {
+enum NetworkServiceError: LocalizedError, Equatable {
+    case syncUnavailable
     case invalidResponse
     case statusCode(Int)
 
+    var isRetryable: Bool {
+        switch self {
+        case .syncUnavailable:
+            return false
+        case .invalidResponse:
+            return true
+        case let .statusCode(code):
+            if code == 408 || code == 429 {
+                return true
+            }
+            return (500 ... 599).contains(code)
+        }
+    }
+
     var errorDescription: String? {
         switch self {
+        case .syncUnavailable:
+            return "Sync is unavailable because the API base URL is missing or invalid."
         case .invalidResponse:
             return "The server returned an invalid response."
         case let .statusCode(code):

@@ -26,6 +26,7 @@ final class BLEService: NSObject, BLEServiceType, CBCentralManagerDelegate, CBPe
 
     func startScanning() {
         shouldScan = true
+        parser.reset()
         if central.state == .poweredOn {
             onConnectionStateChange?(.scanning)
             central.scanForPeripherals(withServices: [UARTService.serviceUUID], options: nil)
@@ -38,6 +39,7 @@ final class BLEService: NSObject, BLEServiceType, CBCentralManagerDelegate, CBPe
         if let connectedPeripheral {
             central.cancelPeripheralConnection(connectedPeripheral)
         }
+        parser.reset()
         onConnectionStateChange?(.disconnected)
     }
 

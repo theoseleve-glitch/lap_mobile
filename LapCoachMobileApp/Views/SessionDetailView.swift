@@ -16,15 +16,14 @@ struct SessionDetailView: View {
                 summaryCard
                 lapCard
 
-                if currentSession.uploadState != .uploaded {
-                    Button("Retry Upload") {
-                        Task {
-                            await appModel.retryUpload(for: currentSession)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(BrandTheme.accent)
+                if let lastError = currentSession.lastError {
+                    Text(lastError)
+                        .font(.footnote)
+                        .foregroundStyle(BrandTheme.danger)
+                        .appCard()
                 }
+
+                uploadAction
             }
             .padding(20)
         }
@@ -100,11 +99,36 @@ struct SessionDetailView: View {
         .appCard()
     }
 
+    @ViewBuilder
+    private var uploadAction: some View {
+        if currentSession.uploadState != .uploaded {
+            if appModel.isSyncAvailable == false {
+                Text("Sync is unavailable right now, but this session is safely stored on the device.")
+                    .foregroundStyle(BrandTheme.muted)
+                    .appCard()
+            } else if appModel.authSession == nil {
+                Button("Sign In to Upload") {
+                    appModel.presentLogin()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(BrandTheme.accent)
+            } else {
+                Button(currentSession.uploadState == .failed ? "Retry Upload" : "Upload Now") {
+                    Task {
+                        await appModel.retryUpload(for: currentSession)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(BrandTheme.accent)
+            }
+        }
+    }
+
     private var uploadColor: Color {
         switch currentSession.uploadState {
         case .uploaded:
             return BrandTheme.success
-        case .uploading:
+        case .registering, .uploadingChunks, .finalizing:
             return BrandTheme.warning
         case .pending:
             return BrandTheme.accent
