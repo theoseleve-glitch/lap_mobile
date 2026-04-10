@@ -10,6 +10,7 @@ final class SessionManager: ObservableObject {
     @Published private(set) var connectedPeripheralName: String?
     @Published private(set) var lastErrorMessage: String?
     @Published private(set) var lapCount = 0
+    @Published private(set) var completedLaps: [LapRecord] = []
     @Published private(set) var liveDelta: Double?
     @Published private(set) var currentLapTime: TimeInterval = 0.0
     @Published private(set) var bestLapTrace: LapTrace?
@@ -206,6 +207,7 @@ final class SessionManager: ObservableObject {
         latestSample = sample
         statistics.consume(sample)
         lapCount = statistics.laps.count
+        completedLaps = statistics.laps
 
         // Update delta tracker reference if a new best emerged
         if let trace = statistics.bestLapTrace, trace.lapIndex != bestLapTrace?.lapIndex {
@@ -259,6 +261,7 @@ final class SessionManager: ObservableObject {
         latestMotion = nil
         latestSample = nil
         lapCount = 0
+        completedLaps = []
         lastErrorMessage = nil
         connectedPeripheralName = nil
         bleConnectionState = .idle

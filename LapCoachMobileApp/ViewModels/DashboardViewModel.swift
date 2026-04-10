@@ -62,13 +62,11 @@ final class DashboardViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Lap table: pinned best + reverse chronological (temporary: uses summary laps until completedLaps is wired)
-        sessionManager.$lapCount
-            .combineLatest(sessionManager.$activeSession)
+        // Lap table: pinned best + reverse chronological
+        sessionManager.$completedLaps
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, session in
+            .sink { [weak self] laps in
                 guard let self else { return }
-                let laps = session?.summary?.laps ?? []
                 self.bestLap = laps.min(by: { $0.durationSeconds < $1.durationSeconds })
                 self.sortedLaps = laps
                     .filter { $0.index != self.bestLap?.index }
