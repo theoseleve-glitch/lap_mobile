@@ -31,30 +31,51 @@ final class LapTimingEngineTests: XCTestCase {
             ax: nil, ay: nil, az: nil, gx: nil, gy: nil, gz: nil, horizontalAccuracy: nil
         ))
 
-        // Mid-lap sample
-        accumulator.consume(SensorSample(
-            sessionID: sessionID, timestampMs: 20_000, source: .phone,
-            latDeg: 0.5, lonDeg: 0.5, speedMps: 14.0, headingDeg: nil,
-            ax: nil, ay: nil, az: nil, gx: nil, gy: nil, gz: nil, horizontalAccuracy: nil
-        ))
+        // Generate 12 mid-lap samples (need >= 10 for trace storage)
+        for i in 1...12 {
+            accumulator.consume(SensorSample(
+                sessionID: sessionID,
+                timestampMs: Int64(12_000 + i * 1_000),
+                source: .phone,
+                latDeg: Double(i) * 0.05,
+                lonDeg: 0.5 - Double(i) * 0.08,
+                speedMps: 14.0,
+                headingDeg: nil,
+                ax: nil, ay: nil, az: nil, gx: nil, gy: nil, gz: nil, horizontalAccuracy: nil
+            ))
+        }
 
         // Second crossing -> completes lap 1
         accumulator.consume(SensorSample(
-            sessionID: sessionID, timestampMs: 24_000, source: .phone,
+            sessionID: sessionID, timestampMs: 25_000, source: .phone,
             latDeg: 0.0, lonDeg: -0.5, speedMps: 11.0, headingDeg: nil,
             ax: nil, ay: nil, az: nil, gx: nil, gy: nil, gz: nil, horizontalAccuracy: nil
         ))
 
+        // Generate 12 mid-lap samples for lap 2
+        for i in 1...12 {
+            accumulator.consume(SensorSample(
+                sessionID: sessionID,
+                timestampMs: Int64(25_000 + i * 1_000),
+                source: .phone,
+                latDeg: Double(i) * 0.05,
+                lonDeg: -0.5 + Double(i) * 0.08,
+                speedMps: 13.0,
+                headingDeg: nil,
+                ax: nil, ay: nil, az: nil, gx: nil, gy: nil, gz: nil, horizontalAccuracy: nil
+            ))
+        }
+
         // Cross again -> completes lap 2
         accumulator.consume(SensorSample(
-            sessionID: sessionID, timestampMs: 36_000, source: .phone,
+            sessionID: sessionID, timestampMs: 38_000, source: .phone,
             latDeg: 0.0, lonDeg: 0.5, speedMps: 13.0, headingDeg: nil,
             ax: nil, ay: nil, az: nil, gx: nil, gy: nil, gz: nil, horizontalAccuracy: nil
         ))
 
         XCTAssertEqual(accumulator.laps.count, 2)
         XCTAssertNotNil(accumulator.bestLapTrace)
-        XCTAssertGreaterThan(accumulator.bestLapTrace!.points.count, 0)
+        XCTAssertGreaterThan(accumulator.bestLapTrace!.points.count, 9)
     }
 
     func testAccumulatorProvidesCurrentLapDistance() {
