@@ -10,12 +10,13 @@ final class SessionManager: ObservableObject {
     @Published private(set) var connectedPeripheralName: String?
     @Published private(set) var lastErrorMessage: String?
     @Published private(set) var lapCount = 0
-    @Published private(set) var isUploading = false
+    @Published private(set) var liveDelta: Double?
+    @Published private(set) var currentLapTime: TimeInterval = 0.0
+    @Published private(set) var bestLapTrace: LapTrace?
 
     var onSessionPersisted: ((RecordedSession) -> Void)?
 
     private let storageService: StorageService
-    private let networkService: NetworkServiceType
     private let locationService: LocationServiceType
     private let motionService: MotionServiceType
     private let bleService: BLEServiceType
@@ -23,19 +24,18 @@ final class SessionManager: ObservableObject {
     private var latestLocation: LocationSnapshot?
     private var latestMotion: MotionSnapshot?
     private var statistics = SessionStatisticsAccumulator(track: nil)
+    private var deltaTracker = LapDeltaTracker(referenceLap: nil)
     private var writerArtifacts: SessionArtifacts?
     private var sampleContinuation: AsyncStream<SensorSample>.Continuation?
     private var writerLoopTask: Task<Void, Never>?
 
     init(
         storageService: StorageService,
-        networkService: NetworkServiceType,
         locationService: LocationServiceType,
         motionService: MotionServiceType,
         bleService: BLEServiceType
     ) {
         self.storageService = storageService
-        self.networkService = networkService
         self.locationService = locationService
         self.motionService = motionService
         self.bleService = bleService
@@ -75,8 +75,9 @@ final class SessionManager: ObservableObject {
         }
     }
 
-    func stopRecording(authSession: AuthSession?) async {
-        guard var session = activeSession else { return }
+    func stopRecording() async -> RecordedSession? {
+        guard state != .finalizing else { return nil }
+        guard var session = activeSession else { return nil }
 
         state = .finalizing
         stopSensors()
@@ -95,48 +96,12 @@ final class SessionManager: ObservableObject {
             activeSession = finalizedSession
             state = finalizedSession.status == .failed ? .failed : .completed
             onSessionPersisted?(finalizedSession)
-
-            if let authSession {
-                Task { [weak self] in
-                    await self?.uploadExistingSession(finalizedSession, authSession: authSession)
-                }
-            }
+            return finalizedSession
         } catch {
             state = .failed
             lastErrorMessage = error.localizedDescription
+            return nil
         }
-    }
-
-    func uploadExistingSession(_ session: RecordedSession, authSession: AuthSession) async {
-        isUploading = true
-        var uploadingSession = session
-        uploadingSession.uploadState = .uploading
-        uploadingSession.lastError = nil
-
-        do {
-            try await storageService.save(session: uploadingSession)
-            onSessionPersisted?(uploadingSession)
-
-            let fileURL = await storageService.fileURL(for: session)
-            let remoteSessionID = try await networkService.upload(
-                session: uploadingSession,
-                fileURL: fileURL,
-                authSession: authSession
-            )
-
-            uploadingSession.remoteSessionID = remoteSessionID
-            uploadingSession.uploadState = .uploaded
-            try await storageService.save(session: uploadingSession)
-            onSessionPersisted?(uploadingSession)
-        } catch {
-            uploadingSession.uploadState = .failed
-            uploadingSession.lastError = error.localizedDescription
-            try? await storageService.save(session: uploadingSession)
-            onSessionPersisted?(uploadingSession)
-            lastErrorMessage = error.localizedDescription
-        }
-
-        isUploading = false
     }
 
     private func bindServices() {
@@ -242,6 +207,25 @@ final class SessionManager: ObservableObject {
         statistics.consume(sample)
         lapCount = statistics.laps.count
 
+        // Update delta tracker reference if a new best emerged
+        if let trace = statistics.bestLapTrace, trace.lapIndex != bestLapTrace?.lapIndex {
+            bestLapTrace = trace
+            deltaTracker.setReference(trace)
+            deltaTracker.reset()
+        }
+
+        // Compute live delta
+        if let coordinate = sample.coordinate {
+            liveDelta = deltaTracker.update(
+                coordinate: coordinate,
+                cumulativeDistance: statistics.currentLapDistanceMeters,
+                elapsedTime: statistics.currentLapElapsedSeconds,
+                speedMps: sample.speedMps ?? 0.0
+            )
+        }
+
+        currentLapTime = statistics.currentLapElapsedSeconds
+
         if var session = activeSession {
             session.totalSamples = statistics.sampleCount
             activeSession = session
@@ -280,6 +264,10 @@ final class SessionManager: ObservableObject {
         bleConnectionState = .idle
         statistics = SessionStatisticsAccumulator(track: track)
         writerArtifacts = nil
+        liveDelta = nil
+        currentLapTime = 0.0
+        bestLapTrace = nil
+        deltaTracker = LapDeltaTracker(referenceLap: nil)
     }
 
     private func stopSensors() {
