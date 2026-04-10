@@ -11,6 +11,14 @@ struct SessionStatisticsAccumulator: Sendable {
     private(set) var startedAtMs: Int64?
     private(set) var endedAtMs: Int64?
 
+    // Trace building
+    private(set) var bestLapTrace: LapTrace?
+    private(set) var currentLapDistanceMeters = 0.0
+    private(set) var currentLapElapsedSeconds = 0.0
+    private var currentLapPoints: [LapTracePoint] = []
+    private var currentLapStartMs: Int64?
+    private var lapDistanceAtLapStart = 0.0
+
     init(track: Track?) {
         if let line = track?.startFinishLine {
             lapEngine = LapTimingEngine(startFinishLine: line)
@@ -30,9 +38,27 @@ struct SessionStatisticsAccumulator: Sendable {
             previousCoordinate = coordinate
         }
 
+        // Track current lap metrics
+        if currentLapStartMs == nil {
+            currentLapStartMs = sample.timestampMs
+            lapDistanceAtLapStart = distanceMeters
+        }
+        currentLapDistanceMeters = distanceMeters - lapDistanceAtLapStart
+        currentLapElapsedSeconds = Double(sample.timestampMs - (currentLapStartMs ?? sample.timestampMs)) / 1_000.0
+
+        // Build trace point for current lap
+        if let coordinate = sample.coordinate {
+            currentLapPoints.append(LapTracePoint(
+                cumulativeDistanceMeters: currentLapDistanceMeters,
+                coordinate: coordinate,
+                elapsedTimeSeconds: currentLapElapsedSeconds
+            ))
+        }
+
         if var lapEngine {
             if let lap = lapEngine.consume(sample) {
                 laps.append(lap)
+                finalizeLapTrace(lap: lap)
             }
             self.lapEngine = lapEngine
         }
@@ -47,6 +73,36 @@ struct SessionStatisticsAccumulator: Sendable {
             maxSpeedMps: maxSpeedMps,
             laps: laps
         )
+    }
+
+    private mutating func finalizeLapTrace(lap: LapRecord) {
+        // Skip trace storage for very short laps (< 10 GPS samples)
+        guard currentLapPoints.count >= 10 else {
+            currentLapPoints = []
+            currentLapStartMs = endedAtMs
+            lapDistanceAtLapStart = distanceMeters
+            currentLapDistanceMeters = 0.0
+            currentLapElapsedSeconds = 0.0
+            return
+        }
+
+        let trace = LapTrace(
+            lapIndex: lap.index,
+            durationSeconds: lap.durationSeconds,
+            points: currentLapPoints
+        )
+
+        // Update best if this lap is the new best (or first)
+        if bestLapTrace == nil || lap.durationSeconds < (bestLapTrace?.durationSeconds ?? .greatestFiniteMagnitude) {
+            bestLapTrace = trace
+        }
+
+        // Reset for next lap
+        currentLapPoints = []
+        currentLapStartMs = endedAtMs
+        lapDistanceAtLapStart = distanceMeters
+        currentLapDistanceMeters = 0.0
+        currentLapElapsedSeconds = 0.0
     }
 }
 
